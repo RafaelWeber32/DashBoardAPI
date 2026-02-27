@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nexus Analytics v2</title>
+  <title>Nexus Analytics v4</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
@@ -15,6 +15,15 @@
     body { background-color: #0B0E14; color: #cbd5e1; font-family: ui-sans-serif, system-ui, sans-serif; }
     @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
     .animate-shimmer { animation: shimmer 1.5s infinite; }
+    
+    /* Custom select style */
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300F0FF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+      background-repeat: no-repeat;
+      background-position: right 1rem center;
+      background-size: 1em;
+    }
   </style>
 </head>
 <body>
@@ -32,6 +41,8 @@
     const Download = ({className}) => <Icon className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Icon>;
     const ShieldCheck = ({className}) => <Icon className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></Icon>;
     const Key = ({className}) => <Icon className={className}><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></Icon>;
+    const Settings = ({className}) => <Icon className={className}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></Icon>;
+    const ImageInfo = ({className}) => <Icon className={className}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></Icon>;
 
     const EChart = ({ option, style, className }) => {
       const chartRef = useRef(null);
@@ -72,9 +83,10 @@
       const [dashboardData, setDashboardData] = useState(null);
       const [errorMsg, setErrorMsg] = useState('');
       const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_api_key') || '');
+      const [selectedModel, setSelectedModel] = useState('gemini-1.5-flash-latest');
 
       useEffect(() => {
-        console.log("Nexus Analytics v2.0 Carregado - O Cache foi limpo!");
+        console.log("Nexus Analytics v4.0 Carregado - Suporte a Imagens Ativado!");
       }, []);
 
       const handleApiKeyChange = (e) => {
@@ -83,15 +95,16 @@
         localStorage.setItem('gemini_api_key', val);
       };
 
-      const analyzePDFWithGemini = async (base64Data) => {
+      // Recebe também o mimeType dinamicamente
+      const analyzeMediaWithGemini = async (base64Data, mimeType) => {
         try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
           
           const payload = {
             contents: [{
               parts: [
-                { text: "Você é um Analista de Dados Sênior. Leia este documento e crie um dashboard analítico universal. 1. Identifique o nome da Empresa/Projeto. 2. Crie um resumo de 1 linha. 3. Identifique os 4 KPIs mais importantes (números principais, ex: faturamento, capacidade, número de clientes, etc). 4. Extraia dados para um gráfico de rosca (distribuição/proporção de algo importante). 5. Extraia ou projete dados temporais/históricos para um gráfico de área. 6. Avalie o documento e dê notas de 0 a 100 em 5 categorias relevantes ao assunto para um gráfico radar. IMPORTANTE: RETORNE APENAS JSON PURO, sem formatação markdown ou blocos de código." },
-                { inlineData: { mimeType: "application/pdf", data: base64Data } }
+                { text: "Você é um Analista de Dados Sênior. Leia este documento (ou imagem) e crie um dashboard analítico universal. 1. Identifique o nome da Empresa/Projeto. 2. Crie um resumo de 1 linha. 3. Identifique os 4 KPIs mais importantes (números principais, ex: faturamento, capacidade, número de clientes, etc). 4. Extraia dados para um gráfico de rosca (distribuição/proporção de algo importante). 5. Extraia ou projete dados temporais/históricos para um gráfico de área. 6. Avalie o conteúdo e dê notas de 0 a 100 em 5 categorias relevantes ao assunto para um gráfico radar. IMPORTANTE: RETORNE APENAS JSON PURO, sem formatação markdown ou blocos de código." },
+                { inlineData: { mimeType: mimeType, data: base64Data } }
               ]
             }],
             generationConfig: {
@@ -156,31 +169,35 @@
           return;
         }
         const file = e.target.files[0] || e.dataTransfer?.files[0];
-        if (file && file.type === 'application/pdf') {
+        
+        // Agora aceita PDF e imagens (jpeg, png, webp, etc)
+        if (file && (file.type === 'application/pdf' || file.type.startsWith('image/'))) {
           setFileData(file); 
           setAppState('analyzing'); 
-          setLoadingMsg('Conectando à Inteligência Artificial...');
+          setLoadingMsg(`Conectando ao modelo ${selectedModel}...`);
           setErrorMsg('');
 
           const reader = new FileReader();
           reader.onload = async (event) => {
             try {
               const base64Data = event.target.result.split(',')[1];
-              setLoadingMsg('A ler e a extrair dados do PDF...');
-              const extractedData = await analyzePDFWithGemini(base64Data);
+              setLoadingMsg(`A ler e a extrair dados do ${file.type.includes('pdf') ? 'PDF' : 'Print/Imagem'}...`);
+              
+              // Passa o mimetype dinâmico
+              const extractedData = await analyzeMediaWithGemini(base64Data, file.type);
               
               setLoadingMsg('A processar KPIs e a montar gráficos...');
               setDashboardData(extractedData);
               setAppState('dashboard');
             } catch (err) {
               console.error("Detalhes do erro:", err);
-              setErrorMsg(`Detalhe Técnico retornado pelo Google: \n\n${err.message}`);
+              setErrorMsg(`Detalhe Técnico retornado pelo Google:\n\n${err.message}\n\nDICA: Tente mudar o modelo de IA no menu inicial.`);
               setAppState('error');
             }
           };
           reader.readAsDataURL(file);
         } else { 
-          alert("Por favor, envie apenas arquivos .PDF"); 
+          alert("Formato inválido. Por favor, envie apenas arquivos .PDF, .PNG, .JPG ou .WEBP"); 
         }
       };
 
@@ -225,13 +242,13 @@
           <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
              <div className="text-red-500 mb-4"><ShieldCheck className="w-16 h-16 mx-auto" /></div>
              <h2 className="text-2xl font-bold text-white mb-2">Erro na Análise do Documento</h2>
-             <p className="text-slate-400 mb-4 max-w-2xl">Não foi possível processar o documento. Verifique os detalhes técnicos abaixo:</p>
+             <p className="text-slate-400 mb-4 max-w-2xl">Não foi possível processar o arquivo. Verifique os detalhes técnicos abaixo:</p>
              
              <div className="bg-red-950/30 border border-red-500/30 p-4 rounded-xl mb-6 max-w-2xl w-full text-left overflow-auto">
                <p className="text-red-300 font-mono text-sm whitespace-pre-wrap">{errorMsg}</p>
              </div>
              
-             <button onClick={() => setAppState('upload')} className="bg-[#00F0FF]/10 hover:bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/30 px-6 py-2 rounded-full transition-all">Tentar Novamente</button>
+             <button onClick={() => setAppState('upload')} className="bg-[#00F0FF]/10 hover:bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/30 px-6 py-2 rounded-full transition-all">Trocar Modelo e Tentar Novamente</button>
           </div>
         );
       }
@@ -241,33 +258,59 @@
           <div className="min-h-screen flex flex-col items-center justify-center p-6">
             <div className="max-w-3xl w-full text-center mb-10">
               <div className="inline-flex p-4 bg-[#151A23] rounded-2xl mb-6 shadow-[0_0_30px_rgba(0,240,255,0.1)] border border-white/5"><Cpu className="w-10 h-10 text-[#00F0FF]" /></div>
-              <h1 className="text-4xl font-black text-white mb-4">Nexus <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00F0FF] to-[#B026FF]">Doc2Dash <span className="text-sm border border-[#B026FF] rounded px-2 py-1 align-top">v2</span></span></h1>
-              <p className="text-slate-400 text-lg">Faça upload do PDF. Nossa IA extrairá os KPIs e construirá um dashboard analítico.</p>
+              <h1 className="text-4xl font-black text-white mb-4">Nexus <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00F0FF] to-[#B026FF]">Doc2Dash <span className="text-sm border border-[#B026FF] rounded px-2 py-1 align-top">v4</span></span></h1>
+              <p className="text-slate-400 text-lg">Faça upload de PDFs ou <span className="text-[#00F0FF] font-semibold">Prints de Tela</span>. A IA entende tudo.</p>
             </div>
 
-            <div className="w-full max-w-3xl mb-8 bg-[#151A23] border border-white/10 p-6 rounded-2xl text-left">
-              <label className="block text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
-                <Key className="w-4 h-4 text-[#B026FF]"/> 
-                Chave de API do Google Gemini
-              </label>
-              <input 
-                type="password" 
-                value={apiKey}
-                onChange={handleApiKeyChange}
-                placeholder="Cole sua API Key aqui (ex: AIzaSy...)" 
-                className="w-full bg-[#0B0E14] border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#00F0FF] transition-colors"
-              />
-              <p className="text-xs text-slate-500 mt-2">
-                Sua chave fica salva apenas no seu navegador. Não tem uma? <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#00F0FF] hover:underline">Pegue de graça no Google AI Studio</a>.
-              </p>
+            <div className="w-full max-w-3xl mb-8 bg-[#151A23] border border-white/10 p-6 rounded-2xl text-left grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
+                  <Key className="w-4 h-4 text-[#B026FF]"/> 
+                  Chave de API (Google Gemini)
+                </label>
+                <input 
+                  type="password" 
+                  value={apiKey}
+                  onChange={handleApiKeyChange}
+                  placeholder="Ex: AIzaSy..." 
+                  className="w-full bg-[#0B0E14] border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#00F0FF] transition-colors"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-[#00F0FF]"/> 
+                  Modelo de Inteligência Artificial
+                </label>
+                <select 
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="w-full bg-[#0B0E14] border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#00F0FF] transition-colors cursor-pointer"
+                >
+                  <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash (Padrão)</option>
+                  <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro (Mais potente)</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Antigo)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Experimental)</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-2 mt-2">
+                <p className="text-xs text-slate-500">
+                  A chave fica salva apenas no seu navegador. Se um modelo der erro, selecione outro na lista. Não tem chave? <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#00F0FF] hover:underline">Pegue grátis no Google AI Studio</a>.
+                </p>
+              </div>
             </div>
 
             <label onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault(); handleFileSelect(e);}} className="group relative flex flex-col items-center justify-center w-full max-w-3xl h-80 border-2 border-dashed border-slate-700 rounded-3xl bg-[#151A23]/50 hover:bg-[#151A23] hover:border-[#00F0FF]/50 transition-all cursor-pointer">
               <UploadCloud className="w-16 h-16 text-slate-500 group-hover:text-[#00F0FF] mb-6" />
-              <h3 className="text-2xl font-bold text-white mb-2">Arraste seu PDF aqui</h3>
+              <h3 className="text-2xl font-bold text-white mb-2">Arraste seu PDF ou Imagem aqui</h3>
               <p className="text-slate-500 mb-6">ou clique para procurar no computador</p>
-              <div className="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700"><FileText className="w-4 h-4 text-[#B026FF]" /><span className="text-xs font-semibold text-slate-300">APENAS .PDF</span></div>
-              <input type="file" className="hidden" accept=".pdf" onChange={handleFileSelect} />
+              <div className="flex gap-4">
+                <div className="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700"><FileText className="w-4 h-4 text-[#B026FF]" /><span className="text-xs font-semibold text-slate-300">.PDF</span></div>
+                <div className="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700"><ImageInfo className="w-4 h-4 text-[#00F0FF]" /><span className="text-xs font-semibold text-slate-300">.JPG / .PNG</span></div>
+              </div>
+              {/* O input file agora aceita imagens também */}
+              <input type="file" className="hidden" accept=".pdf,image/png,image/jpeg,image/webp" onChange={handleFileSelect} />
             </label>
           </div>
         );
@@ -278,9 +321,9 @@
           <div className="min-h-screen flex flex-col items-center justify-center p-6">
             <div className="max-w-md w-full text-center">
               <div className="relative w-32 h-32 mx-auto mb-8 animate-spin rounded-full border-4 border-dashed border-[#00F0FF] flex items-center justify-center">
-                <FileText className="w-8 h-8 text-white animate-pulse absolute" />
+                <Cpu className="w-8 h-8 text-white animate-pulse absolute" />
               </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Nexus AI Lendo Documento...</h2>
+              <h2 className="text-2xl font-bold text-white mb-2">Nexus AI Processando...</h2>
               <p className="text-[#00F0FF] font-mono text-sm mb-8 h-6 animate-pulse">{loadingMsg}</p>
             </div>
           </div>
@@ -303,7 +346,7 @@
         <div className="min-h-screen p-6 max-w-7xl mx-auto">
           <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/5 pb-6">
             <div>
-              <button onClick={() => setAppState('upload')} className="flex items-center gap-1 text-slate-500 hover:text-[#00F0FF] text-sm mb-4"><ChevronRight className="w-4 h-4 rotate-180" /> Analisar outro PDF</button>
+              <button onClick={() => setAppState('upload')} className="flex items-center gap-1 text-slate-500 hover:text-[#00F0FF] text-sm mb-4"><ChevronRight className="w-4 h-4 rotate-180" /> Analisar outro arquivo</button>
               <h1 className="text-3xl font-bold text-white flex items-center gap-3"><Zap className="text-[#00F0FF] w-8 h-8" />{dashboardData.companyName}</h1>
               <p className="text-slate-400 mt-2 max-w-2xl">{dashboardData.summary}</p>
             </div>
