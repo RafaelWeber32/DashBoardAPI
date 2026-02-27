@@ -68,7 +68,10 @@
       for (let i = 0; i < retries; i++) {
         try {
           const response = await fetch(url, options);
-          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData?.error?.message || `HTTP error! status: ${response.status}`);
+          }
           return await response.json();
         } catch (e) {
           if (i === retries - 1) throw e;
@@ -94,7 +97,8 @@
 
       const analyzePDFWithGemini = async (base64Data) => {
         try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+          // Alterado para o modelo público e estável gemini-1.5-flash
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
           
           const payload = {
             contents: [{
@@ -181,7 +185,9 @@
               setDashboardData(extractedData);
               setAppState('dashboard');
             } catch (err) {
-              setErrorMsg('Falha ao analisar o PDF com a IA. Tente novamente.');
+              console.error("Detalhes do erro:", err);
+              // Agora exibe o erro exato retornado pela API do Google
+              setErrorMsg(`API do Google retornou: ${err.message}`);
               setAppState('error');
             }
           };
@@ -233,7 +239,7 @@
           <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
              <div className="text-red-500 mb-4"><ShieldCheck className="w-16 h-16 mx-auto" /></div>
              <h2 className="text-2xl font-bold text-white mb-2">Erro na Análise</h2>
-             <p className="text-slate-400 mb-6">{errorMsg}</p>
+             <p className="text-slate-400 mb-6 max-w-2xl break-words">{errorMsg}</p>
              <button onClick={() => setAppState('upload')} className="bg-[#00F0FF]/10 hover:bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/30 px-6 py-2 rounded-full transition-all">Tentar Novamente</button>
           </div>
         );
