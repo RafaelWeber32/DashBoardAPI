@@ -44,6 +44,7 @@
     const ShieldCheck = ({className}) => <Icon className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></Icon>;
     const BarChart3 = ({className}) => <Icon className={className}><path d="M3 3v18h18"/><rect width="4" height="7" x="7" y="10" rx="1"/><rect width="4" height="12" x="15" y="5" rx="1"/></Icon>;
     const Activity = ({className}) => <Icon className={className}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></Icon>;
+    const Key = ({className}) => <Icon className={className}><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></Icon>;
 
     // --- HOOK E COMPONENTE DE GRÁFICO ---
     const EChart = ({ option, style, className }) => {
@@ -61,43 +62,182 @@
       return <div ref={chartRef} style={style} className={className} />;
     };
 
+    // --- FUNÇÃO DE CHAMADA A API COM RETRY ---
+    const fetchWithRetry = async (url, options, retries = 5) => {
+      const delays = [1000, 2000, 4000, 8000, 16000];
+      for (let i = 0; i < retries; i++) {
+        try {
+          const response = await fetch(url, options);
+          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+          return await response.json();
+        } catch (e) {
+          if (i === retries - 1) throw e;
+          await new Promise(res => setTimeout(res, delays[i]));
+        }
+      }
+    };
+
     // --- COMPONENTE PRINCIPAL ---
     function App() {
-      const [appState, setAppState] = useState('upload'); // upload, analyzing, dashboard
+      const [appState, setAppState] = useState('upload'); // upload, analyzing, dashboard, error
       const [fileData, setFileData] = useState(null);
-      const [progress, setProgress] = useState(0);
       const [loadingMsg, setLoadingMsg] = useState('');
       const [dashboardData, setDashboardData] = useState(null);
+      const [errorMsg, setErrorMsg] = useState('');
+      const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_api_key') || '');
 
-      const mockExtractedData = {
-        companyName: "Energy Group", totalCapacity: 347.4, hydroCapacity: 186.4, solarCapacity: 161.0, activePlants: 25,
+      const handleApiKeyChange = (e) => {
+        const val = e.target.value;
+        setApiKey(val);
+        localStorage.setItem('gemini_api_key', val);
+      };
+
+      const analyzePDFWithGemini = async (base64Data) => {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+          
+          const payload = {
+            contents: [{
+              parts: [
+                { text: "Você é um Analista de Dados Sênior. Leia este documento e crie um dashboard analítico universal. 1. Identifique o nome da Empresa/Projeto. 2. Crie um resumo de 1 linha. 3. Identifique os 4 KPIs mais importantes (números principais, ex: faturamento, capacidade, número de clientes, etc). 4. Extraia dados para um gráfico de rosca (distribuição/proporção de algo importante). 5. Extraia ou projete dados temporais/históricos para um gráfico de área. 6. Avalie o documento e dê notas de 0 a 100 em 5 categorias relevantes ao assunto para um gráfico radar." },
+                { inlineData: { mimeType: "application/pdf", data: base64Data } }
+              ]
+            }],
+            generationConfig: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "OBJECT",
+                properties: {
+                  companyName: { type: "STRING" },
+                  summary: { type: "STRING" },
+                  kpis: {
+                    type: "ARRAY",
+                    description: "Exatamente 4 KPIs",
+                    items: { type: "OBJECT", properties: { label: { type: "STRING" }, value: { type: "STRING" }, unit: { type: "STRING" } } }
+                  },
+                  donutChart: {
+                    type: "OBJECT",
+                    properties: {
+                      title: { type: "STRING" },
+                      data: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, value: { type: "NUMBER" } } } }
+                    }
+                  },
+                  areaChart: {
+                    type: "OBJECT",
+                    properties: {
+                      title: { type: "STRING" },
+                      xAxis: { type: "ARRAY", items: { type: "STRING" } },
+                      series: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, data: { type: "ARRAY", items: { type: "NUMBER" } } } } }
+                    }
+                  },
+                  radarChart: {
+                    type: "OBJECT",
+                    properties: {
+                      title: { type: "STRING" },
+                      categories: { type: "ARRAY", items: { type: "STRING" } },
+                      scores: { type: "ARRAY", items: { type: "NUMBER" } }
+                    }
+                  }
+                },
+                required: ["companyName", "summary", "kpis", "donutChart", "areaChart", "radarChart"]
+              }
+            }
+          };
+
+          const result = await fetchWithRetry(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          const jsonText = result.candidates[0].content.parts[0].text;
+          return JSON.parse(jsonText);
+        } catch (error) {
+          console.error("Erro na API:", error);
+          throw error;
+        }
       };
 
       const handleFileSelect = (e) => {
+        if (!apiKey || apiKey.trim() === "") {
+          alert("Por favor, insira sua chave da API do Google Gemini antes de carregar o arquivo.");
+          return;
+        }
         const file = e.target.files[0] || e.dataTransfer?.files[0];
         if (file && file.type === 'application/pdf') {
-          setFileData(file); setAppState('analyzing'); setProgress(0);
-          const steps = [
-            { p: 15, m: "Lendo PDF...", d: 500 }, { p: 40, m: "Processando Contexto...", d: 1500 },
-            { p: 65, m: "Extraindo KPIs...", d: 2500 }, { p: 85, m: "Gerando Dados...", d: 3500 },
-            { p: 100, m: "Pronto!", d: 4500 }
-          ];
-          steps.forEach(step => {
-            setTimeout(() => { setProgress(step.p); setLoadingMsg(step.m);
-              if (step.p === 100) setTimeout(() => { setDashboardData(mockExtractedData); setAppState('dashboard'); }, 500);
-            }, step.d);
-          });
-        } else { alert("Por favor, envie apenas arquivos .PDF"); }
+          setFileData(file); 
+          setAppState('analyzing'); 
+          setLoadingMsg('Conectando à Inteligência Artificial...');
+          setErrorMsg('');
+
+          const reader = new FileReader();
+          reader.onload = async (event) => {
+            try {
+              const base64Data = event.target.result.split(',')[1];
+              setLoadingMsg('Lendo e extraindo dados do PDF...');
+              const extractedData = await analyzePDFWithGemini(base64Data);
+              
+              setLoadingMsg('Processando KPIs e montando gráficos...');
+              setDashboardData(extractedData);
+              setAppState('dashboard');
+            } catch (err) {
+              setErrorMsg('Falha ao analisar o PDF com a IA. Tente novamente.');
+              setAppState('error');
+            }
+          };
+          reader.readAsDataURL(file);
+        } else { 
+          alert("Por favor, envie apenas arquivos .PDF"); 
+        }
       };
 
       const handleDownloadHtml = () => {
         if (!dashboardData) return;
-        const htmlTemplate = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Dashboard Analítico - ${dashboardData.companyName}</title><script src="https://cdn.tailwindcss.com"><\/script><script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"><\/script><style>body { background-color: #0B0E14; color: #cbd5e1; font-family: ui-sans-serif, system-ui, sans-serif; }</style></head><body class="p-6 sm:p-10 font-sans selection:bg-[#00F0FF] selection:text-black"><div class="max-w-7xl mx-auto"><header class="mb-8 border-b border-white/10 pb-6 flex justify-between items-center"><div><h1 class="text-3xl font-bold text-white flex items-center gap-3"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#00F0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${dashboardData.companyName}</h1><p class="text-slate-500 mt-1 ml-11 text-sm tracking-widest uppercase">Relatório Interativo Offline • Extraído via Nexus AI</p></div></header><div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8"><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p class="text-slate-500 text-xs font-bold uppercase mb-1">Capacidade Total</p><h3 class="text-4xl font-black text-white">${dashboardData.totalCapacity} <span class="text-lg text-[#00F0FF]">MW</span></h3></div><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p class="text-slate-500 text-xs font-bold uppercase mb-1">Geração Hídrica</p><h3 class="text-3xl font-black text-white">${dashboardData.hydroCapacity} <span class="text-lg text-[#0066FF]">MW</span></h3></div><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p class="text-slate-500 text-xs font-bold uppercase mb-1">Complexo Solar</p><h3 class="text-3xl font-black text-white">${dashboardData.solarCapacity} <span class="text-lg text-[#B026FF]">MWp</span></h3></div><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p class="text-slate-500 text-xs font-bold uppercase mb-1">Usinas Ativas</p><h3 class="text-3xl font-black text-white">${dashboardData.activePlants} <span class="text-lg text-slate-400">Ativos</span></h3></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6 col-span-1 lg:col-span-2"><h2 class="text-lg font-semibold text-white mb-4">Evolução Histórica de Capacidade</h2><div id="chart-area" style="height: 320px; width: 100%;"></div></div><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><h2 class="text-lg font-semibold text-white mb-4">Diversificação da Matriz</h2><div id="chart-donut" style="height: 320px; width: 100%;"></div></div><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><h2 class="text-lg font-semibold text-white mb-4">Índice de Maturidade</h2><div id="chart-radar" style="height: 320px; width: 100%;"></div></div></div></div><script>const cArea=echarts.init(document.getElementById('chart-area'));cArea.setOption({backgroundColor:'transparent',tooltip:{trigger:'axis'},legend:{data:['Base Original','Aquisição Copel','Complexo Solar'],textStyle:{color:'#A0AEC0'}},xAxis:[{type:'category',boundaryGap:false,data:['Pré-2023','2023','2024','2025'],axisLabel:{color:'#A0AEC0'}}],yAxis:[{type:'value',splitLine:{lineStyle:{color:'rgba(255,255,255,0.05)'}},axisLabel:{color:'#A0AEC0'}}],series:[{name:'Base Original',type:'line',stack:'Total',smooth:true,areaStyle:{color:'rgba(0,102,255,0.3)'},data:[67.7,67.7,67.7,67.7]},{name:'Aquisição Copel',type:'line',stack:'Total',smooth:true,areaStyle:{color:'rgba(0,240,255,0.3)'},data:[0,0,118.7,118.7]},{name:'Complexo Solar',type:'line',stack:'Total',smooth:true,itemStyle:{color:'#B026FF'},areaStyle:{color:'rgba(176,38,255,0.3)'},data:[0,0,0,161.0]}]});const cDonut=echarts.init(document.getElementById('chart-donut'));cDonut.setOption({backgroundColor:'transparent',tooltip:{trigger:'item'},legend:{bottom:'0%',textStyle:{color:'#A0AEC0'}},series:[{name:'Capacidade',type:'pie',radius:['50%','75%'],data:[{value:${dashboardData.hydroCapacity},name:'Hídrica',itemStyle:{color:'#00F0FF'}},{value:${dashboardData.solarCapacity},name:'Solar',itemStyle:{color:'#B026FF'}}]}]});const cRadar=echarts.init(document.getElementById('chart-radar'));cRadar.setOption({backgroundColor:'transparent',radar:{radius:'55%',indicator:[{name:'Comercialização',max:100},{name:'Hídrica',max:100},{name:'Solar',max:100},{name:'Soluções',max:100},{name:'PPAs',max:100}],axisName:{color:'#00F0FF'}},series:[{type:'radar',data:[{value:[100,95,85,60,90],name:'Score',areaStyle:{color:'rgba(176,38,255,0.3)'},itemStyle:{color:'#00F0FF'},lineStyle:{color:'#00F0FF'}}]}]});window.addEventListener('resize',()=>{cArea.resize();cDonut.resize();cRadar.resize();});<\/script></body></html>`;
+        
+        // Preparando os dados dinâmicos para injetar no HTML
+        const safeData = JSON.stringify(dashboardData);
+        const kpiHtml = dashboardData.kpis.map((kpi, i) => {
+          const colors = ['#00F0FF', '#0066FF', '#B026FF', '#A0AEC0'];
+          return `<div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p class="text-slate-500 text-xs font-bold uppercase mb-1">${kpi.label}</p><h3 class="text-3xl font-black text-white">${kpi.value} <span class="text-lg" style="color:${colors[i%4]}">${kpi.unit}</span></h3></div>`;
+        }).join('');
+
+        const htmlTemplate = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Dashboard - ${dashboardData.companyName}</title><script src="https://cdn.tailwindcss.com"><\/script><script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"><\/script><style>body { background-color: #0B0E14; color: #cbd5e1; font-family: ui-sans-serif, system-ui, sans-serif; }</style></head><body class="p-6 sm:p-10 font-sans selection:bg-[#00F0FF] selection:text-black"><div class="max-w-7xl mx-auto"><header class="mb-8 border-b border-white/10 pb-6 flex justify-between items-center"><div><h1 class="text-3xl font-bold text-white flex items-center gap-3"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#00F0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>${dashboardData.companyName}</h1><p class="text-slate-500 mt-1 ml-11 text-sm">${dashboardData.summary}</p></div></header><div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">${kpiHtml}</div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6 col-span-1 lg:col-span-2"><h2 class="text-lg font-semibold text-white mb-4" id="title-area">Evolução Histórica</h2><div id="chart-area" style="height: 320px; width: 100%;"></div></div><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><h2 class="text-lg font-semibold text-white mb-4" id="title-donut">Distribuição</h2><div id="chart-donut" style="height: 320px; width: 100%;"></div></div><div class="bg-[#151A23] border border-white/5 rounded-2xl p-6"><h2 class="text-lg font-semibold text-white mb-4" id="title-radar">Análise Qualitativa</h2><div id="chart-radar" style="height: 320px; width: 100%;"></div></div></div></div><script>
+        const dbData = ${safeData};
+        document.getElementById('title-area').innerText = dbData.areaChart.title;
+        document.getElementById('title-donut').innerText = dbData.donutChart.title;
+        document.getElementById('title-radar').innerText = dbData.radarChart.title;
+        
+        const colors = ['rgba(0,102,255,0.3)', 'rgba(0,240,255,0.3)', 'rgba(176,38,255,0.3)', 'rgba(255,255,255,0.2)'];
+        const lineColors = ['#0066FF', '#00F0FF', '#B026FF', '#ffffff'];
+
+        const cArea=echarts.init(document.getElementById('chart-area'));
+        cArea.setOption({backgroundColor:'transparent',tooltip:{trigger:'axis'},legend:{textStyle:{color:'#A0AEC0'}},xAxis:[{type:'category',boundaryGap:false,data:dbData.areaChart.xAxis,axisLabel:{color:'#A0AEC0'}}],yAxis:[{type:'value',splitLine:{lineStyle:{color:'rgba(255,255,255,0.05)'}},axisLabel:{color:'#A0AEC0'}}],series: dbData.areaChart.series.map((s, i) => ({ name: s.name, type: 'line', stack: 'Total', smooth: true, itemStyle: { color: lineColors[i%4] }, areaStyle: { color: colors[i%4] }, data: s.data }))});
+        
+        const cDonut=echarts.init(document.getElementById('chart-donut'));
+        cDonut.setOption({backgroundColor:'transparent',tooltip:{trigger:'item'},legend:{bottom:'0%',textStyle:{color:'#A0AEC0'}},series:[{type:'pie',radius:['40%','70%'], itemStyle: { borderRadius: 10, borderColor: '#151A23', borderWidth: 2 }, data: dbData.donutChart.data.map((d, i) => ({...d, itemStyle: {color: lineColors[i%lineColors.length]}})) }]});
+        
+        const cRadar=echarts.init(document.getElementById('chart-radar'));
+        const radarIndicators = dbData.radarChart.categories.map(c => ({name: c, max: 100}));
+        cRadar.setOption({backgroundColor:'transparent',radar:{radius:'60%',indicator:radarIndicators,axisName:{color:'#00F0FF'}, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } }, splitArea: { show: false } },series:[{type:'radar',data:[{value:dbData.radarChart.scores,name:'Score',areaStyle:{color:'rgba(0,240,255,0.2)'},itemStyle:{color:'#00F0FF'},lineStyle:{color:'#00F0FF'}}]}]});
+        
+        window.addEventListener('resize',()=>{cArea.resize();cDonut.resize();cRadar.resize();});<\/script></body></html>`;
+        
         const blob = new Blob([htmlTemplate], { type: 'text/html;charset=utf-8' });
         const url = URL.createObjectURL(blob);
-        const link = document.createElement('a'); link.href = url; link.download = `Relatorio_${dashboardData.companyName.replace(/\s+/g, '_')}_Offline.html`;
+        const link = document.createElement('a'); link.href = url; link.download = `Relatorio_${dashboardData.companyName.replace(/\s+/g, '_')}_Universal.html`;
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
       };
+
+      if (appState === 'error') {
+        return (
+          <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
+             <div className="text-red-500 mb-4"><ShieldCheck className="w-16 h-16 mx-auto" /></div>
+             <h2 className="text-2xl font-bold text-white mb-2">Erro na Análise</h2>
+             <p className="text-slate-400 mb-6">{errorMsg}</p>
+             <button onClick={() => setAppState('upload')} className="bg-[#00F0FF]/10 hover:bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/30 px-6 py-2 rounded-full transition-all">Tentar Novamente</button>
+          </div>
+        );
+      }
 
       if (appState === 'upload') {
         return (
@@ -107,6 +247,24 @@
               <h1 className="text-4xl font-black text-white mb-4">Nexus <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00F0FF] to-[#B026FF]">Doc2Dash</span></h1>
               <p className="text-slate-400 text-lg">Faça upload do PDF. Nossa IA extrairá os KPIs e construirá um dashboard analítico.</p>
             </div>
+
+            <div className="w-full max-w-3xl mb-8 bg-[#151A23] border border-white/10 p-6 rounded-2xl text-left">
+              <label className="block text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
+                <Key className="w-4 h-4 text-[#B026FF]"/> 
+                Chave de API do Google Gemini
+              </label>
+              <input 
+                type="password" 
+                value={apiKey}
+                onChange={handleApiKeyChange}
+                placeholder="Cole sua API Key aqui (ex: AIzaSy...)" 
+                className="w-full bg-[#0B0E14] border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#00F0FF] transition-colors"
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Sua chave fica salva apenas no seu navegador. Não tem uma? <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[#00F0FF] hover:underline">Pegue de graça no Google AI Studio</a>.
+              </p>
+            </div>
+
             <label onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault(); handleFileSelect(e);}} className="group relative flex flex-col items-center justify-center w-full max-w-3xl h-80 border-2 border-dashed border-slate-700 rounded-3xl bg-[#151A23]/50 hover:bg-[#151A23] hover:border-[#00F0FF]/50 transition-all cursor-pointer">
               <UploadCloud className="w-16 h-16 text-slate-500 group-hover:text-[#00F0FF] mb-6" />
               <h3 className="text-2xl font-bold text-white mb-2">Arraste seu PDF aqui</h3>
@@ -125,20 +283,25 @@
               <div className="relative w-32 h-32 mx-auto mb-8 animate-spin rounded-full border-4 border-dashed border-[#00F0FF] flex items-center justify-center">
                 <FileText className="w-8 h-8 text-white animate-pulse absolute" />
               </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Analisando Documento...</h2>
-              <p className="text-[#00F0FF] font-mono text-sm mb-8 h-6">{loadingMsg}</p>
-              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-2">
-                <div className="h-full bg-gradient-to-r from-[#00F0FF] to-[#B026FF] transition-all duration-500" style={{ width: `${progress}%` }}></div>
-              </div>
-              <div className="text-right text-xs font-mono text-slate-500">{progress}%</div>
+              <h2 className="text-2xl font-bold text-white mb-2">Nexus AI Lendo Documento...</h2>
+              <p className="text-[#00F0FF] font-mono text-sm mb-8 h-6 animate-pulse">{loadingMsg}</p>
             </div>
           </div>
         );
       }
 
-      const getDonutOption = () => ({ backgroundColor: 'transparent', title: { text: `${dashboardData.totalCapacity} MW`, left: 'center', top: 'center', textStyle: { color: '#fff', fontSize: 22 } }, series: [{ type: 'pie', radius: ['50%', '75%'], data: [{ value: dashboardData.hydroCapacity, name: 'Hídrica', itemStyle: { color: '#0066FF' } }, { value: dashboardData.solarCapacity, name: 'Solar', itemStyle: { color: '#B026FF' } }] }] });
-      const getAreaOption = () => ({ backgroundColor: 'transparent', xAxis: { type: 'category', data: ['Pré-2023', '2023', '2024', '2025'] }, yAxis: { type: 'value' }, series: [{ type: 'line', stack: 'Total', areaStyle: { color: 'rgba(0,102,255,0.3)' }, data: [67.7, 67.7, 67.7, 67.7] }, { type: 'line', stack: 'Total', areaStyle: { color: 'rgba(0,240,255,0.3)' }, data: [0, 0, 118.7, 118.7] }, { type: 'line', stack: 'Total', areaStyle: { color: 'rgba(176,38,255,0.3)' }, itemStyle: { color: '#B026FF' }, data: [0, 0, 0, 161.0] }] });
-      const getRadarOption = () => ({ backgroundColor: 'transparent', radar: { indicator: [ { name: 'Comercialização', max: 100 }, { name: 'Hídrica', max: 100 }, { name: 'Solar', max: 100 }, { name: 'Soluções', max: 100 }, { name: 'PPAs', max: 100 } ] }, series: [{ type: 'radar', data: [{ value: [100, 95, 85, 60, 90], areaStyle: { color: 'rgba(176,38,255,0.3)' }, itemStyle: { color: '#00F0FF' } }] }] });
+      // Configuração Universal dos Gráficos ECharts
+      const areaColors = ['rgba(0,102,255,0.3)', 'rgba(0,240,255,0.3)', 'rgba(176,38,255,0.3)'];
+      const lineColors = ['#0066FF', '#00F0FF', '#B026FF'];
+
+      const getAreaOption = () => ({ backgroundColor: 'transparent', tooltip: { trigger: 'axis' }, legend: { textStyle: { color: '#A0AEC0' } }, xAxis: { type: 'category', data: dashboardData.areaChart.xAxis, axisLabel: { color: '#A0AEC0' } }, yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }, axisLabel: { color: '#A0AEC0' } }, series: dashboardData.areaChart.series.map((s, i) => ({ name: s.name, type: 'line', stack: 'Total', smooth: true, itemStyle: { color: lineColors[i % 3] }, areaStyle: { color: areaColors[i % 3] }, data: s.data })) });
+      
+      const getDonutOption = () => ({ backgroundColor: 'transparent', tooltip: { trigger: 'item' }, legend: { bottom: '0%', textStyle: { color: '#A0AEC0' } }, series: [{ type: 'pie', radius: ['40%', '70%'], itemStyle: { borderRadius: 10, borderColor: '#151A23', borderWidth: 2 }, data: dashboardData.donutChart.data.map((d, i) => ({ ...d, itemStyle: { color: lineColors[i % 3] } })) }] });
+      
+      const getRadarOption = () => {
+        const indicators = dashboardData.radarChart.categories.map(cat => ({ name: cat, max: 100 }));
+        return { backgroundColor: 'transparent', radar: { indicator: indicators, axisName: { color: '#00F0FF' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } }, splitArea: { show: false } }, series: [{ type: 'radar', data: [{ value: dashboardData.radarChart.scores, name: 'Avaliação', areaStyle: { color: 'rgba(0,240,255,0.2)' }, itemStyle: { color: '#00F0FF' } }] }] };
+      };
 
       return (
         <div className="min-h-screen p-6 max-w-7xl mx-auto">
@@ -146,23 +309,29 @@
             <div>
               <button onClick={() => setAppState('upload')} className="flex items-center gap-1 text-slate-500 hover:text-[#00F0FF] text-sm mb-4"><ChevronRight className="w-4 h-4 rotate-180" /> Analisar outro PDF</button>
               <h1 className="text-3xl font-bold text-white flex items-center gap-3"><Zap className="text-[#00F0FF] w-8 h-8" />{dashboardData.companyName}</h1>
+              <p className="text-slate-400 mt-2 max-w-2xl">{dashboardData.summary}</p>
             </div>
             <div className="mt-4 md:mt-0 flex gap-4">
               <button onClick={handleDownloadHtml} className="flex items-center gap-2 bg-[#00F0FF]/10 text-[#00F0FF] border border-[#00F0FF]/30 px-4 py-2 rounded-full hover:bg-[#00F0FF]/20 transition-all"><Download className="w-4 h-4" /><span className="text-xs font-bold">BAIXAR DASHBOARD</span></button>
             </div>
           </header>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p className="text-slate-500 text-xs font-bold mb-1">Capacidade Total</p><h3 className="text-4xl font-black text-white">{dashboardData.totalCapacity} MW</h3></div>
-            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p className="text-slate-500 text-xs font-bold mb-1">Hídrica</p><h3 className="text-3xl font-black text-white">{dashboardData.hydroCapacity} MW</h3></div>
-            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p className="text-slate-500 text-xs font-bold mb-1">Solar</p><h3 className="text-3xl font-black text-white">{dashboardData.solarCapacity} MWp</h3></div>
-            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6"><p className="text-slate-500 text-xs font-bold mb-1">Usinas</p><h3 className="text-3xl font-black text-white">{dashboardData.activePlants} Ativas</h3></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            {dashboardData.kpis.map((kpi, index) => {
+               const colors = ['text-[#00F0FF]', 'text-[#0066FF]', 'text-[#B026FF]', 'text-slate-400'];
+               return (
+                 <div key={index} className="bg-[#151A23] border border-white/5 rounded-2xl p-6">
+                   <p className="text-slate-500 text-xs font-bold uppercase mb-1">{kpi.label}</p>
+                   <h3 className="text-3xl font-black text-white">{kpi.value} <span className={`text-lg ${colors[index % 4]}`}>{kpi.unit}</span></h3>
+                 </div>
+               );
+            })}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6 col-span-1 lg:col-span-2"><h2 className="text-lg font-semibold text-white mb-4">Evolução Histórica</h2><div className="h-[320px]"><EChart option={getAreaOption()} style={{height:'100%', width:'100%'}}/></div></div>
-            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6"><h2 className="text-lg font-semibold text-white mb-4">Matriz</h2><div className="h-[320px]"><EChart option={getDonutOption()} style={{height:'100%', width:'100%'}}/></div></div>
-            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6"><h2 className="text-lg font-semibold text-white mb-4">Maturidade</h2><div className="h-[320px]"><EChart option={getRadarOption()} style={{height:'100%', width:'100%'}}/></div></div>
+            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6 col-span-1 lg:col-span-2"><h2 className="text-lg font-semibold text-white mb-4">{dashboardData.areaChart.title}</h2><div className="h-[320px]"><EChart option={getAreaOption()} style={{height:'100%', width:'100%'}}/></div></div>
+            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6"><h2 className="text-lg font-semibold text-white mb-4">{dashboardData.donutChart.title}</h2><div className="h-[320px]"><EChart option={getDonutOption()} style={{height:'100%', width:'100%'}}/></div></div>
+            <div className="bg-[#151A23] border border-white/5 rounded-2xl p-6"><h2 className="text-lg font-semibold text-white mb-4">{dashboardData.radarChart.title}</h2><div className="h-[320px]"><EChart option={getRadarOption()} style={{height:'100%', width:'100%'}}/></div></div>
           </div>
         </div>
       );
